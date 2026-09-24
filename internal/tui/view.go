@@ -16,7 +16,7 @@ var (
 	colorError   = lipgloss.Color("196")
 	colorMuted   = lipgloss.Color("244")
 
-	appStyle = lipgloss.NewStyle().Padding(1, 2)
+	appStyle = lipgloss.NewStyle().Padding(1, 2, 0, 2)
 
 	titleStyle = lipgloss.NewStyle().Bold(true).Foreground(colorAccent)
 	labelStyle = lipgloss.NewStyle().Foreground(colorMuted).Width(15)
@@ -32,7 +32,56 @@ var (
 	selectedStyle = lipgloss.NewStyle().Bold(true).Foreground(colorAccent)
 	panelStyle    = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("238")).Padding(0, 1)
 	dialogStyle   = lipgloss.NewStyle().Border(lipgloss.DoubleBorder()).BorderForeground(colorWarning).Padding(1, 2)
+
+	sidebarStyle = lipgloss.NewStyle().Width(sidebarWidth-1).Padding(0, 1).MarginRight(contentGap).
+			Border(lipgloss.NormalBorder(), false, true, false, false).BorderForeground(lipgloss.Color("238"))
+
+	statusBarStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("252")).Background(lipgloss.Color("236"))
+	incomingStatusStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("232")).Background(colorWarning)
 )
+
+const (
+	// Below this width the sidebar would squeeze the content, so the tabs
+	// move back to a row above it.
+	sidebarMinWidth = 80
+	sidebarWidth    = 24
+	// Short terminals drop the top padding and the blank footer line.
+	compactHeight = 16
+	contentGap    = 2
+	appPaddingX   = 4
+)
+
+// frame is the text area left for the active view.
+type frame struct {
+	sidebar bool
+	width   int
+	height  int
+}
+
+func (m Model) frame() frame {
+	f := frame{sidebar: m.width >= sidebarMinWidth}
+	f.width = m.width - appPaddingX
+	f.height = m.mainHeight()
+	if f.sidebar {
+		f.width -= sidebarWidth + contentGap
+	} else {
+		f.height -= 2
+	}
+	f.width = max(20, f.width)
+	f.height = max(3, f.height)
+	return f
+}
+
+func (m Model) mainHeight() int {
+	return max(1, m.height-m.paddingTop()-lipgloss.Height(m.footerView()))
+}
+
+func (m Model) paddingTop() int {
+	if m.height < compactHeight {
+		return 0
+	}
+	return 1
+}
 
 // View renders the active screen from presentation state only.
 func (m Model) View() string {
@@ -40,6 +89,7 @@ func (m Model) View() string {
 		return smallTerminalView(m.width, m.height)
 	}
 
+	f := m.frame()
 	var body string
 	switch m.active {
 	case ViewPhone:
@@ -55,16 +105,131 @@ func (m Model) View() string {
 	default:
 		body = "Unknown view"
 	}
-
-	parts := []string{m.headerView(), "", body}
-	if status := m.statusView(); status != "" {
-		parts = append(parts, "", status)
-	}
-	parts = append(parts, "", mutedStyle.Render(m.helpView()))
 	if m.quitPending {
-		parts = append(parts, "", dialogStyle.Render("A call is in progress. Quit anyway?\n\n[y] Quit   [n] Stay"))
+		body = lipgloss.Place(f.width, f.height, lipgloss.Center, lipgloss.Center,
+			dialogStyle.Render("A call is in progress. Quit anyway?\n\n[y] Quit   [n] Stay"))
 	}
-	return appStyle.Width(max(0, m.width-4)).Render(strings.Join(parts, "\n"))
+
+	mainHeight := m.mainHeight()
+	contentHeight := mainHeight
+	if !f.sidebar {
+		contentHeight -= 2
+	}
+	// Fixed size keeps the footer on the last lines, whatever the view renders.
+	content := lipgloss.NewStyle().Height(contentHeight).MaxHeight(contentHeight).MaxWidth(f.width).Render(body)
+
+	var main string
+	if f.sidebar {
+		main = lipgloss.JoinHorizontal(lipgloss.Top, m.sidebarView(mainHeight), content)
+	} else {
+		main = m.headerView() + "\n\n" + content
+	}
+	return appStyle.PaddingTop(m.paddingTop()).Render(main + "\n" + m.footerView())
+}
+
+func (m Model) footerView() string {
+	width := max(1, m.width-appPaddingX)
+	wrap := lipgloss.NewStyle().Width(width)
+	footer := m.statusBarView(width) + "\n" + wrap.Render(mutedStyle.Render(m.helpView()))
+	if status := m.statusView(); status != "" || m.height >= compactHeight {
+		footer = wrap.Render(status) + "\n" + footer
+	}
+	if m.height >= compactHeight {
+		footer = "\n" + footer
+	}
+	return footer
+}
+
+// statusBarView keeps the phone state visible in every view and layout. When
+// space runs out it drops the user name, then the peer, then the registration
+// word next to its colored dot, so call state and duration stay readable.
+func (m Model) statusBarView(width int) string {
+	phone := m.snapshot.Phone
+	incoming := phone.CallState == app.CallIncoming
+	base := statusBarStyle
+	if incoming {
+		base = incomingStatusStyle
+	}
+	segment := func(text string, color lipgloss.TerminalColor) string {
+		if incoming || color == nil {
+			return base.Render(text)
+		}
+		return base.Foreground(color).Render(text)
+	}
+
+	peer := strings.TrimSpace(phone.Peer)
+	if peer == "" {
+		peer = "Unknown peer"
+	}
+	user := strings.TrimSpace(m.snapshot.Account.Username)
+	var last string
+	for _, detail := range []struct{ user, peer, registration bool }{
+		{true, true, true}, {false, true, true}, {false, false, true}, {false, false, false},
+	} {
+		registration := "●"
+		if detail.registration {
+			registration += " " + shortRegistrationText(phone)
+		}
+		if detail.user && user != "" {
+			registration += " " + user
+		}
+		var call string
+		var callColor lipgloss.TerminalColor = colorMuted
+		switch phone.CallState {
+		case app.CallIncoming:
+			call = "Incoming"
+			if detail.peer {
+				call += ": " + peer
+			}
+			if m.active != ViewPhone {
+				call += "  [1] answer"
+			}
+		case app.CallOutgoing:
+			call, callColor = "Calling", colorWarning
+			if detail.peer {
+				call += " " + peer
+			}
+		case app.CallActive:
+			call, callColor = "Active "+formatDuration(phone.CallStartedAt, m.snapshot.Now), colorGood
+			if detail.peer {
+				call += " " + peer
+			}
+		default:
+			call = "Idle"
+		}
+
+		segments := []string{segment(registration, registrationStyle(phone).GetForeground()), segment(call, callColor)}
+		if phone.CallState == app.CallActive && phone.Muted {
+			segments = append(segments, segment("Muted", colorWarning))
+		}
+		if phone.DND {
+			segments = append(segments, segment("DND on", colorWarning))
+		} else {
+			segments = append(segments, segment("DND off", nil))
+		}
+		bar := base.Render(" ") + strings.Join(segments, base.Render(" │ ")) + base.Render(" ")
+		if gap := width - lipgloss.Width(bar); gap >= 0 {
+			return bar + base.Render(strings.Repeat(" ", gap))
+		}
+		last = bar
+	}
+	return lipgloss.NewStyle().MaxWidth(width).Render(last)
+}
+
+func (m Model) sidebarView(height int) string {
+	names := []string{"Phone", "Contacts", "Audio", "Account", "History"}
+	lines := []string{titleStyle.Render("GoSipTea"), ""}
+	for i, name := range names {
+		row := fmt.Sprintf("  %d %s", i+1, name)
+		if View(i) == m.active {
+			row = selectedStyle.Render(fmt.Sprintf("› %d %s", i+1, name))
+		}
+		lines = append(lines, row)
+	}
+	if len(lines) > height {
+		lines = lines[2:]
+	}
+	return sidebarStyle.Height(height).MaxHeight(height).Render(strings.Join(lines, "\n"))
 }
 
 func (m Model) headerView() string {
@@ -85,17 +250,9 @@ func (m Model) headerView() string {
 
 func (m Model) phoneView() string {
 	phone := m.snapshot.Phone
-	registration := registrationText(phone)
-	registrationStyle := warnStyle
-	if phone.Registered || phone.Registration == app.RegistrationRegistered {
-		registrationStyle = goodStyle
-	} else if phone.Registration == app.RegistrationFailed {
-		registrationStyle = errorStyle
-	}
-
 	lines := []string{
 		titleStyle.Render("Phone"),
-		fieldLine("Registration", registrationStyle.Render(registration)),
+		fieldLine("Registration", registrationStyle(phone).Render(registrationText(phone))),
 		fieldLine("Call", callStateText(phone.CallState)),
 	}
 	if !callIsIdle(phone.CallState) {
@@ -145,10 +302,11 @@ func (m Model) historyView() string {
 		return strings.Join(append(lines, mutedStyle.Render("No calls yet.")), "\n")
 	}
 
-	limit := max(1, m.height-11)
+	f := m.frame()
+	limit := max(1, f.height-2)
 	start := listStart(m.historyCursor, len(calls), limit)
 	end := min(len(calls), start+limit)
-	peerWidth := max(10, m.width-43)
+	peerWidth := max(10, f.width-38)
 	for i := start; i < end; i++ {
 		call := calls[i]
 		peer := strings.TrimSpace(call.Peer)
@@ -184,7 +342,8 @@ func (m Model) contactsView() string {
 	if len(contacts) == 0 {
 		lines = append(lines, mutedStyle.Render("No matching contacts."))
 	} else {
-		limit := max(1, m.height-13)
+		f := m.frame()
+		limit := max(1, f.height-3)
 		start := listStart(m.contactCursor, len(contacts), limit)
 		end := min(len(contacts), start+limit)
 		for i := start; i < end; i++ {
@@ -194,7 +353,7 @@ func (m Model) contactsView() string {
 			if name == "" {
 				name = displayURI
 			}
-			row := fmt.Sprintf("  %-24s %s", truncate(name, 24), truncate(displayURI, max(12, m.width-36)))
+			row := fmt.Sprintf("  %-24s %s", truncate(name, 24), truncate(displayURI, max(12, f.width-27)))
 			if i == m.contactCursor {
 				row = selectedStyle.Render("› " + strings.TrimPrefix(row, "  "))
 			}
@@ -205,7 +364,8 @@ func (m Model) contactsView() string {
 }
 
 func (m Model) audioView() string {
-	available := max(2, (m.height-13)/2)
+	// Title, blank line and two panels with border and heading take 8 lines.
+	available := max(2, (m.frame().height-8)/2)
 	outputs := m.audioListView("Output", m.outputOptions(), m.outputCursor, m.audioOutput, m.audioField == 0, available)
 	inputs := m.audioListView("Input", m.inputOptions(), m.inputCursor, m.audioInput, m.audioField == 1, available)
 	return strings.Join([]string{titleStyle.Render("Audio"), outputs, "", inputs}, "\n")
@@ -232,13 +392,13 @@ func (m Model) audioListView(title string, options []audioOption, cursor int, se
 			defaultLabel = " (current system default)"
 		}
 		description := app.ClampText(option.Description, 255)
-		row := marker + truncate(description+defaultLabel, max(16, m.width-12))
+		row := marker + truncate(description+defaultLabel, max(16, m.frame().width-6))
 		if focused && i == cursor {
 			row = selectedStyle.Render("› " + strings.TrimPrefix(row, "  "))
 		}
 		lines = append(lines, row)
 	}
-	return panelStyle.Width(max(20, m.width-10)).Render(strings.Join(lines, "\n"))
+	return panelStyle.Width(max(20, m.frame().width-2)).Render(strings.Join(lines, "\n"))
 }
 
 func (m Model) accountView() string {
@@ -305,6 +465,33 @@ func (m Model) helpView() string {
 
 func smallTerminalView(width, height int) string {
 	return fmt.Sprintf("Terminal too small\n\nCurrent: %dx%d\nRequired: at least 44x12\n\nResize the terminal to continue.", width, height)
+}
+
+func registrationStyle(phone PhoneSnapshot) lipgloss.Style {
+	switch {
+	case phone.Registered || phone.Registration == app.RegistrationRegistered:
+		return goodStyle
+	case phone.Registration == app.RegistrationFailed:
+		return errorStyle
+	default:
+		return warnStyle
+	}
+}
+
+// shortRegistrationText ignores the detail text, which rarely fits the sidebar.
+func shortRegistrationText(phone PhoneSnapshot) string {
+	switch {
+	case phone.Registered || phone.Registration == app.RegistrationRegistered:
+		return "Registered"
+	case phone.Registration == app.RegistrationRegistering:
+		return "Registering"
+	case phone.Registration == app.RegistrationFailed:
+		return "Failed"
+	case phone.Registration == app.RegistrationUnregistered:
+		return "Offline"
+	default:
+		return "Unknown"
+	}
 }
 
 func registrationText(phone PhoneSnapshot) string {

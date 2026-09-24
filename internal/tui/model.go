@@ -586,7 +586,8 @@ func (m Model) isTyping() bool {
 }
 
 func (m *Model) resizeInputs() {
-	width := m.width - 24
+	// The field label takes 15 columns, the focus marker another 2.
+	width := m.frame().width - 18
 	if width < 12 {
 		width = 12
 	}
