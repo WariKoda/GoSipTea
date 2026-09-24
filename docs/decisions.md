@@ -1,6 +1,5 @@
 # Confirmed decisions
 
-- The TUI replaces the existing `oma.sip` plugin after a separate migration.
 - Version one supports only the current Omarchy system.
 - One SIP account and one concurrent call are sufficient.
 - All phone functions stop when the TUI exits.
@@ -19,7 +18,6 @@
 
 ## Safety during development
 
-The current `baresip.service` remains active until the migration is approved.
-Development commands must not stop, restart or disable it. The new application
-must refuse to start its own baresip process while the D-Bus name
-`com.github.Baresip` already has an owner.
+Development commands must not stop, restart or disable an existing
+`baresip.service`. GoSipTea must refuse to start its own baresip process while
+the D-Bus name `com.github.Baresip` already has an owner.

@@ -10,10 +10,10 @@ import (
 	"unicode/utf8"
 )
 
-const accountHeader = "# SIP account — managed by the oma.sip plugin (widget or setup.sh).\n" +
+const accountHeader = "# SIP account managed by GoSipTea.\n" +
 	"# Contains the extension password: 600 permission required.\n" +
-	"# Default is TLS + SRTP; unencrypted transport only by explicit choice\n" +
-	"# (the widget overwrites this line when saving the account).\n"
+	"# TLS + SRTP by default; unencrypted transport requires an explicit choice.\n" +
+	"# GoSipTea rewrites this file when saving the account.\n"
 
 var (
 	accountURIPattern = regexp.MustCompile(`<sips?:([^@>]+)@([^;>]+)([^>]*)>`)

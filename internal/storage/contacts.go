@@ -11,7 +11,7 @@ import (
 )
 
 const contactsHeader = "#\n" +
-	"# SIP contacts - managed by the oma.sip plugin.\n" +
+	"# SIP contacts managed by GoSipTea.\n" +
 	"# One contact per line: \"Display name\" <sip:user@host>;addr-params\n" +
 	"# See baresip's modules/contact for the addr-params\n" +
 	"# (;presence=, ;access=allow|block, ;audio=, ;video=).\n" +

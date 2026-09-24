@@ -26,7 +26,7 @@ Das Modul heißt `github.com/nibra/gosiptea` und braucht Go 1.27.
 
 ## Sicherheit im Entwicklungsbetrieb
 
-- Den laufenden `baresip.service` weder stoppen noch neu starten noch deaktivieren. Er gehört zum alten `oma.sip`-Plugin und bleibt aktiv, bis die Migration freigegeben ist.
+- Den laufenden `baresip.service` im Entwicklungsbetrieb weder stoppen noch neu starten noch deaktivieren.
 - Die App verweigert den Start, solange der D-Bus-Name `com.github.Baresip` einen Besitzer hat. Diese Prüfung nicht umgehen oder aufweichen.
 - Automatisierte Tests nutzen niemals das produktive SIP-Konto. Sie arbeiten mit temporären Verzeichnissen und simulierten baresip-Ereignissen. Echte SIP-Tests bleiben ein expliziter manueller Schritt.
 - baresip-Logs enthalten Rufnummern, Adressen und SIP-Auth-Daten. Mit `-baresip-log` und `-sip-trace` nur gezielt aufzeichnen und vor dem Teilen schwärzen. `-sip-trace` verlangt `-baresip-log`.

@@ -89,7 +89,7 @@ func run() error {
 	startCancel()
 	if err != nil {
 		if errors.Is(err, baresip.ErrServiceOwned) {
-			return fmt.Errorf("another baresip instance is active; the current oma.sip service must be disabled during the later migration: %w", err)
+			return fmt.Errorf("another baresip instance is active; GoSipTea requires exclusive use of com.github.Baresip: %w", err)
 		}
 		return fmt.Errorf("start phone session: %w", err)
 	}

@@ -1,10 +1,13 @@
 # GoSipTea
 
+<p align="center">
+  <img src="docs/assets/gosiptea-logo.png" alt="GoSipTea logo: a smiling teacup with a phone-shaped handle" width="280">
+</p>
+
 A terminal SIP softphone for Omarchy, written in Go with Bubble Tea. It uses
 baresip for SIP and audio.
 
-This project is under active development. It must not replace the existing
-`oma.sip` plugin or its user service yet.
+This project is under active development.
 
 ## Intended scope
 
@@ -28,9 +31,9 @@ make check
 make build
 ```
 
-Do not stop the existing `baresip.service` for development. The new binary
-checks the session bus and refuses to start while another baresip instance is
-active. Disabling the old plugin belongs to the later migration step.
+Do not stop an existing `baresip.service` for development. GoSipTea checks the
+session bus and refuses to start while another baresip instance owns
+`com.github.Baresip`.
 
 Install the binary and desktop entry for the current user with:
 
@@ -44,8 +47,7 @@ After source changes, rebuild and replace the installed binary with:
 make update
 ```
 
-After that migration, start the TUI from the app launcher as `GoSipTea`
-or run:
+Start the TUI from the app launcher as `GoSipTea` or run:
 
 ```sh
 gosiptea
@@ -77,8 +79,3 @@ addresses and SIP authentication headers. Do not share them without redaction.
 - `internal/session` serializes events, commands and persistence changes.
 - `internal/storage` reads and writes baresip-compatible files.
 - `internal/tui` contains the Bubble Tea interface without platform I/O.
-
-## Reference implementation
-
-The behavior is based on the MIT-licensed `oma.sip` Omarchy plugin by Vinicius
-Galleti. Its copyright notice is retained in `LICENSE`.

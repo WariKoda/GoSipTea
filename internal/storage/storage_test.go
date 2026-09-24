@@ -44,6 +44,18 @@ func TestListContactsRejectsSymlinkToFIFOWithoutBlocking(t *testing.T) {
 	}
 }
 
+func TestNewContactsHeader(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "baresip")
+	store := storage.New(dir)
+	if err := store.AddContact(storage.Contact{Name: "Alice", URI: "sip:alice@example.com"}); err != nil {
+		t.Fatalf("AddContact() error = %v", err)
+	}
+	contents := readFile(t, filepath.Join(dir, "contacts"))
+	if !strings.HasPrefix(contents, "#\n# SIP contacts managed by GoSipTea.\n") {
+		t.Fatalf("unexpected contacts header:\n%s", contents)
+	}
+}
+
 func TestAccountRoundTripModesAndPasswordRetention(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "baresip")
 	store := storage.New(dir)
@@ -58,7 +70,10 @@ func TestAccountRoundTripModesAndPasswordRetention(t *testing.T) {
 
 	assertMode(t, dir, 0o700)
 	assertMode(t, filepath.Join(dir, "accounts"), 0o600)
-	assertMode(t, filepath.Join(dir, ".oma.sip.lock"), 0o600)
+	assertMode(t, filepath.Join(dir, ".gosiptea.lock"), 0o600)
+	if contents := readFile(t, filepath.Join(dir, "accounts")); !strings.HasPrefix(contents, "# SIP account managed by GoSipTea.\n") {
+		t.Fatalf("unexpected account header:\n%s", contents)
+	}
 
 	account, err := store.ReadAccount()
 	if err != nil {

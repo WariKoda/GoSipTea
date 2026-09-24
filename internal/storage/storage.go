@@ -38,7 +38,7 @@ type Paths struct {
 	Lock     string
 }
 
-// Store persists the subset of baresip state managed by oma.sip.
+// Store persists the subset of baresip state managed by GoSipTea.
 type Store struct {
 	paths Paths
 }
@@ -52,7 +52,7 @@ func New(dir string) *Store {
 		Contacts: filepath.Join(dir, "contacts"),
 		Config:   filepath.Join(dir, "config"),
 		History:  filepath.Join(dir, "gosiptea-call-history.json"),
-		Lock:     filepath.Join(dir, ".oma.sip.lock"),
+		Lock:     filepath.Join(dir, ".gosiptea.lock"),
 	}}
 }
 
