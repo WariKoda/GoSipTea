@@ -144,10 +144,19 @@ type ContactInput struct {
 	URI  string
 }
 
-// AudioSelection uses an empty node name for the system default.
+// AudioField names the device list an audio action changes.
+type AudioField string
+
+const (
+	AudioOutput AudioField = "output"
+	AudioInput  AudioField = "input"
+)
+
+// AudioSelection changes only Field, so a stale value for the other list can
+// never be sent back. An empty Name selects the system default.
 type AudioSelection struct {
-	Input  string
-	Output string
+	Field AudioField
+	Name  string
 }
 
 // AccountInput contains account form values. Password is write-only and must not be echoed by adapters.

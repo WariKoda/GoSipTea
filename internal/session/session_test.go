@@ -717,13 +717,14 @@ type sentNotification struct {
 type fakeNotifier struct {
 	mu   sync.Mutex
 	sent []sentNotification
+	err  error
 }
 
 func (n *fakeNotifier) Send(_ context.Context, summary, body string) error {
 	n.mu.Lock()
+	defer n.mu.Unlock()
 	n.sent = append(n.sent, sentNotification{summary: summary, body: body})
-	n.mu.Unlock()
-	return nil
+	return n.err
 }
 
 func (n *fakeNotifier) count() int {

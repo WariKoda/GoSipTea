@@ -97,6 +97,13 @@ func (s *Session) SelectAudio(ctx context.Context, config storage.AudioConfig) e
 	return err
 }
 
+// SelectAudioDevice validates, applies, and persists one direction. An empty
+// name selects the system default. The other direction keeps its selection.
+func (s *Session) SelectAudioDevice(ctx context.Context, kind audio.Kind, name string) error {
+	_, err := s.request(ctx, request{kind: requestSelectAudioDevice, audioKind: kind, text: name})
+	return err
+}
+
 // ReadAccount refreshes and returns the non-secret account view.
 func (s *Session) ReadAccount(ctx context.Context) (storage.Account, error) {
 	result, err := s.request(ctx, request{kind: requestReadAccount})

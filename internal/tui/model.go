@@ -390,13 +390,12 @@ func (m Model) updateAudio(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if len(options) == 0 {
 			return m, nil
 		}
-		selected := options[*cursor].Name
-		if m.audioField == 0 {
-			m.audioOutput = selected
-		} else {
-			m.audioInput = selected
+		// The selection marker follows the session snapshot, not this key press.
+		field := AudioOutput
+		if m.audioField == 1 {
+			field = AudioInput
 		}
-		return m, m.emit(Action{Kind: ActionSetAudio, Audio: AudioSelection{Input: m.audioInput, Output: m.audioOutput}})
+		return m, m.emit(Action{Kind: ActionSetAudio, Audio: AudioSelection{Field: field, Name: options[*cursor].Name}})
 	}
 	return m, nil
 }
@@ -515,11 +514,24 @@ func (m *Model) syncAccountForm() {
 	m.accountDirty = false
 }
 
+// syncAudioSelection moves a cursor to the selected node only when the
+// selection changed. Otherwise the cursor stays on the same node, so unrelated
+// snapshots do not interrupt navigation.
 func (m *Model) syncAudioSelection() {
+	inputName := optionName(m.inputOptions(), m.inputCursor)
+	outputName := optionName(m.outputOptions(), m.outputCursor)
+	inputChanged := m.audioInput != m.snapshot.Audio.SelectedInput
+	outputChanged := m.audioOutput != m.snapshot.Audio.SelectedOutput
 	m.audioInput = m.snapshot.Audio.SelectedInput
 	m.audioOutput = m.snapshot.Audio.SelectedOutput
-	m.inputCursor = optionIndex(m.inputOptions(), m.audioInput)
-	m.outputCursor = optionIndex(m.outputOptions(), m.audioOutput)
+	if inputChanged {
+		inputName = m.audioInput
+	}
+	if outputChanged {
+		outputName = m.audioOutput
+	}
+	m.inputCursor = optionIndex(m.inputOptions(), inputName)
+	m.outputCursor = optionIndex(m.outputOptions(), outputName)
 }
 
 func (m *Model) clampCursors() {
@@ -693,6 +705,13 @@ func audioOptions(nodes []AudioNodeSnapshot, selected string) []audioOption {
 		options = append(options, audioOption{Name: selected, Description: selected + " (unavailable)"})
 	}
 	return options
+}
+
+func optionName(options []audioOption, index int) string {
+	if index < 0 || index >= len(options) {
+		return ""
+	}
+	return options[index].Name
 }
 
 func optionIndex(options []audioOption, name string) int {

@@ -233,14 +233,67 @@ func TestAudioSelectionIncludesDefaultAndDiscoveredNodes(t *testing.T) {
 	model, _ = updateModel(model, key("3"))
 	model, _ = updateModel(model, key("down"))
 	model, _ = updateModel(model, key("enter"))
-	if len(actions) != 1 || actions[0].Kind != ActionSetAudio || actions[0].Audio.Output != "desk.output" {
+	if len(actions) != 1 || actions[0].Kind != ActionSetAudio || actions[0].Audio != (AudioSelection{Field: AudioOutput, Name: "desk.output"}) {
 		t.Fatalf("audio actions = %#v", actions)
 	}
 
 	model, _ = updateModel(model, key("up"))
 	model, _ = updateModel(model, key("enter"))
-	if len(actions) != 2 || actions[1].Audio.Output != "" {
+	if len(actions) != 2 || actions[1].Audio != (AudioSelection{Field: AudioOutput}) {
 		t.Fatalf("default audio action = %#v", actions)
+	}
+}
+
+// Selecting an output and then an input while the session still publishes the
+// old output must not send that old output back.
+func TestAudioSelectionSendsOnlyChangedField(t *testing.T) {
+	var actions []Action
+	model := New(testSnapshot(), func(action Action) tea.Cmd {
+		actions = append(actions, action)
+		return nil
+	})
+	model, _ = updateModel(model, key("3"))
+	model, _ = updateModel(model, key("down"))
+	model, _ = updateModel(model, key("enter"))
+
+	intermediate := testSnapshot()
+	model, _ = updateModel(model, SnapshotMsg{Snapshot: intermediate})
+
+	model, _ = updateModel(model, key("tab"))
+	model, _ = updateModel(model, key("down"))
+	model, _ = updateModel(model, key("enter"))
+	want := []AudioSelection{
+		{Field: AudioOutput, Name: "desk.output"},
+		{Field: AudioInput, Name: "desk.input"},
+	}
+	if len(actions) != len(want) {
+		t.Fatalf("audio actions = %#v", actions)
+	}
+	for i, action := range actions {
+		if action.Kind != ActionSetAudio || action.Audio != want[i] {
+			t.Fatalf("audio action %d = %#v, want %#v", i, action.Audio, want[i])
+		}
+	}
+}
+
+func TestAudioCursorSurvivesUnrelatedSnapshots(t *testing.T) {
+	model := New(testSnapshot(), nil)
+	model, _ = updateModel(model, key("3"))
+	model, _ = updateModel(model, key("down"))
+	if model.outputCursor != 1 {
+		t.Fatalf("output cursor = %d, want 1", model.outputCursor)
+	}
+
+	model, _ = updateModel(model, SnapshotMsg{Snapshot: testSnapshot()})
+	if model.outputCursor != 1 {
+		t.Fatalf("unrelated snapshot moved the output cursor to %d", model.outputCursor)
+	}
+
+	selected := testSnapshot()
+	selected.Audio.SelectedInput = "desk.input"
+	model, _ = updateModel(model, SnapshotMsg{Snapshot: selected})
+	if model.inputCursor != 1 || model.outputCursor != 1 {
+		t.Fatalf("cursors after input selection = input %d, output %d", model.inputCursor, model.outputCursor)
 	}
 }
 
@@ -392,6 +445,8 @@ func key(value string) tea.KeyMsg {
 		return tea.KeyMsg{Type: tea.KeyUp}
 	case "down":
 		return tea.KeyMsg{Type: tea.KeyDown}
+	case "tab":
+		return tea.KeyMsg{Type: tea.KeyTab}
 	default:
 		return runeKey(value)
 	}

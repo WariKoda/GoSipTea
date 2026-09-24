@@ -194,7 +194,14 @@ func makeDispatch(parent context.Context, phone *session.Session, countryCode st
 			case tui.ActionRemoveContact:
 				_, err = phone.RemoveContact(ctx, action.Target)
 			case tui.ActionSetAudio:
-				err = phone.SelectAudio(ctx, storage.AudioConfig{Input: action.Audio.Input, Output: action.Audio.Output})
+				switch action.Audio.Field {
+				case tui.AudioOutput:
+					err = phone.SelectAudioDevice(ctx, audio.KindSink, action.Audio.Name)
+				case tui.AudioInput:
+					err = phone.SelectAudioDevice(ctx, audio.KindSource, action.Audio.Name)
+				default:
+					err = fmt.Errorf("unsupported audio field %q", action.Audio.Field)
+				}
 			case tui.ActionSaveAccount:
 				secure := action.Account.Secure
 				err = phone.WriteAccount(ctx, storage.AccountCredentials{

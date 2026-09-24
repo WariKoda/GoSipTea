@@ -86,13 +86,7 @@ func (s *Session) handleBaresipEvent(rt *runtime, raw baresip.Event) error {
 	if err != nil {
 		return err
 	}
-	if err := s.applyDomainEvent(rt, rt.ctx, event); err != nil {
-		return err
-	}
-	if call, ok := event.(app.CallEvent); ok && call.Type == app.CallEventIncoming {
-		s.pauseMedia(rt.ctx)
-	}
-	return nil
+	return s.applyDomainEvent(rt, rt.ctx, event)
 }
 
 func (s *Session) pauseMedia(ctx context.Context) {
@@ -145,8 +139,11 @@ func (s *Session) applyDomainEvent(rt *runtime, ctx context.Context, event app.E
 
 	var notificationErrors []error
 	for _, notification := range transition.Notifications {
+		// A failed desktop notification must not keep media playing while the
+		// call rings, so both side effects start before Send.
 		if notification.Kind == app.NotificationIncoming {
 			s.focusWindow(ctx)
+			s.pauseMedia(ctx)
 		}
 		summary := notificationSummary(notification.Kind)
 		notifyCtx, cancel := context.WithTimeout(ctx, s.config.CommandTimeout)
@@ -326,6 +323,8 @@ func (s *Session) handleRequest(rt *runtime, req request) (requestResult, bool) 
 		result.err = s.applySelectedAudio(rt, req.ctx, req.audio, true)
 	case requestSelectAudio:
 		result.err = s.selectAudio(rt, req.ctx, req.audio)
+	case requestSelectAudioDevice:
+		result.err = s.selectAudioDevice(rt, req.ctx, req.audioKind, req.text)
 	case requestReadAccount:
 		result.value, result.err = s.readAccount()
 	case requestWriteAccount:
@@ -459,34 +458,89 @@ func (s *Session) selectAudio(rt *runtime, ctx context.Context, config storage.A
 	if err != nil {
 		return err
 	}
+
+	// Resolve every change before the first command, so a missing input cannot
+	// leave only the output switched.
+	var changes []audioChange
 	if changeOutput {
-		if err := validateAudioSelection(nodes, storage.AudioConfig{Output: config.Output}); err != nil {
-			return err
-		}
-		device, err := liveAudioDevice(nodes, audio.KindSink, config.Output)
+		change, err := resolveAudioChange(nodes, "auplay", audio.KindSink, config.Output, current.Output)
 		if err != nil {
 			return err
 		}
-		if err := s.applyAudioCommand(rt, ctx, "auplay", device); err != nil {
-			return err
-		}
+		changes = append(changes, change)
 	}
 	if changeInput {
-		if err := validateAudioSelection(nodes, storage.AudioConfig{Input: config.Input}); err != nil {
-			return err
-		}
-		device, err := liveAudioDevice(nodes, audio.KindSource, config.Input)
+		change, err := resolveAudioChange(nodes, "ausrc", audio.KindSource, config.Input, current.Input)
 		if err != nil {
 			return err
 		}
-		if err := s.applyAudioCommand(rt, ctx, "ausrc", device); err != nil {
-			return err
+		changes = append(changes, change)
+	}
+	for i, change := range changes {
+		if err := s.applyAudioCommand(rt, ctx, change.command, change.device); err != nil {
+			return errors.Join(err, s.restoreAudio(rt, ctx, changes[:i]))
 		}
 	}
 	if err := s.persistAudio(config); err != nil {
 		return fmt.Errorf("session: audio changed for this process but was not saved: %w", err)
 	}
 	return nil
+}
+
+// selectAudioDevice changes one direction and keeps the other selection. The
+// merge runs on the runtime goroutine, so selections cannot revert each other.
+func (s *Session) selectAudioDevice(rt *runtime, ctx context.Context, kind audio.Kind, name string) error {
+	config := s.Snapshot().AudioConfig
+	switch kind {
+	case audio.KindSink:
+		config.Output = name
+	case audio.KindSource:
+		config.Input = name
+	default:
+		return fmt.Errorf("session: unknown audio kind %q", kind)
+	}
+	return s.selectAudio(rt, ctx, config)
+}
+
+type audioChange struct {
+	command  string
+	device   string
+	previous string
+}
+
+func resolveAudioChange(nodes []audio.Node, command string, kind audio.Kind, selected, current string) (audioChange, error) {
+	config := storage.AudioConfig{Output: selected}
+	if kind == audio.KindSource {
+		config = storage.AudioConfig{Input: selected}
+	}
+	if err := validateAudioSelection(nodes, config); err != nil {
+		return audioChange{}, err
+	}
+	device, err := liveAudioDevice(nodes, kind, selected)
+	if err != nil {
+		return audioChange{}, err
+	}
+	// Without a previous device there is nothing to restore after a failure.
+	previous, _ := liveAudioDevice(nodes, kind, current)
+	return audioChange{command: command, device: device, previous: previous}, nil
+}
+
+// restoreAudio switches already applied changes back after a later command
+// failed. It ignores the caller's cancellation because a timeout is a common
+// reason for that failure; applyAudioCommand still bounds each call.
+func (s *Session) restoreAudio(rt *runtime, ctx context.Context, applied []audioChange) error {
+	ctx = context.WithoutCancel(ctx)
+	var errs []error
+	for _, change := range applied {
+		if change.previous == "" {
+			errs = append(errs, fmt.Errorf("session: restore %s: no previous device", change.command))
+			continue
+		}
+		if err := s.applyAudioCommand(rt, ctx, change.command, change.previous); err != nil {
+			errs = append(errs, fmt.Errorf("session: restore previous device: %w", err))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 func normalizeAudioConfig(config storage.AudioConfig) storage.AudioConfig {

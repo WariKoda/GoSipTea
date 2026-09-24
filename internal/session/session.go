@@ -133,20 +133,22 @@ const (
 	requestPersistAudio
 	requestApplyAudio
 	requestSelectAudio
+	requestSelectAudioDevice
 	requestReadAccount
 	requestWriteAccount
 	requestStop
 )
 
 type request struct {
-	ctx     context.Context
-	kind    requestKind
-	action  app.ActionEvent
-	contact storage.Contact
-	text    string
-	audio   storage.AudioConfig
-	account storage.AccountCredentials
-	result  chan requestResult
+	ctx       context.Context
+	kind      requestKind
+	action    app.ActionEvent
+	contact   storage.Contact
+	text      string
+	audio     storage.AudioConfig
+	audioKind audio.Kind
+	account   storage.AccountCredentials
+	result    chan requestResult
 }
 
 type requestResult struct {
