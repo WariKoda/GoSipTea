@@ -1,0 +1,32 @@
+PipeWire 'pipewire-0'
+ └─ Clients:
+        32. WirePlumber
+
+Audio
+ ├─ Devices:
+ │     116. alsa_card.usb-Yamaha_Corporation_Steinberg_UR22mkII-00 [alsa]
+ ├─ Sinks:
+ │  *   34. speaker [vol: 0.70]
+ ├─ Sources:
+ │      99. alsa_input.hw_UR22mkII_0 [vol: 1.00]
+ ├─ Filters:
+ │    - loopback-1
+ │      94. alsa_input.usb-Yamaha_Corporation_Steinberg_UR22mkII-00.HiFi__Line3__source [Audio/Source]
+ │     107. alsa_input.usb-Yamaha_Corporation_Steinberg_UR22mkII-00.HiFi__Line3__source.split [Stream/Input/Audio/Internal]
+ │    - loopback-2
+ │  *  102. alsa_input.usb-Yamaha_Corporation_Steinberg_UR22mkII-00.HiFi__Line2__source [Audio/Source]
+ │     118. alsa_input.usb-Yamaha_Corporation_Steinberg_UR22mkII-00.HiFi__Line2__source.split [Stream/Input/Audio/Internal]
+ └─ Streams:
+       200. application
+            201. capture_MONO < Input 1:capture_MONO [active]
+
+Video
+ ├─ Sources:
+ │  *   79. camera
+ ├─ Filters:
+ │     210. video-filter [Video/Source]
+ └─ Streams:
+
+Settings
+ └─ Default Configured Devices:
+         1. Audio/Source alsa_input.usb-Yamaha_Corporation_Steinberg_UR22mkII-00.HiFi__Line2__source

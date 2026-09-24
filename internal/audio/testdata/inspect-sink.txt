@@ -1,0 +1,6 @@
+id 34, type PipeWire:Interface:Node
+    device.api = "alsa"
+  * media.class = "Audio/Sink"
+  * node.description = "Headset Analog Stereo"
+  * node.name = "alsa_output.usb-Headset-00.analog-stereo"
+  * node.nick = "Headset"

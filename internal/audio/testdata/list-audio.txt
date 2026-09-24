@@ -1,0 +1,5 @@
+52	alsa_card.pci-0000_09_00.4	audio/device	 
+34	alsa_output.usb-Headset-00.analog-stereo	audio/sink	*
+45	alsa_output.pci-0000_07_00.1.hdmi-stereo	audio/sink	 
+48	alsa_input.usb-Headset-00.mono-fallback	audio/source	*
+61	alsa_input.usb-Camera-02.analog-stereo	audio/source	 

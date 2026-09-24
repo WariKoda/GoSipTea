@@ -1,0 +1,13 @@
+/gosiptea
+/dist/
+*.out
+/.ocr-reviews/
+*.log
+.env
+.env.*
+!.env.example
+/.baresip/
+/accounts
+/contacts
+/config
+/gosiptea-call-history.json
