@@ -21,6 +21,29 @@ func TestCallerNameExactAddressWinsAndHostIsCaseInsensitive(t *testing.T) {
 	}
 }
 
+func TestCallerNameKeepsDisplayNameWithAt(t *testing.T) {
+	got := CallerName(nil, "sip:+4930123456@trunk", "support@example.com", "49")
+	if got != "support@example.com" {
+		t.Fatalf("CallerName() = %q, want support@example.com", got)
+	}
+	if got := CallerName(nil, "sip:alice@example.com", "  ", "49"); got != "alice" {
+		t.Fatalf("CallerName() with blank display name = %q, want alice", got)
+	}
+}
+
+func TestNormalizeContactURILowercasesScheme(t *testing.T) {
+	tests := map[string]string{
+		"SIP:Alice@Example.com": "sip:Alice@Example.com",
+		"Sips:bob@example.com":  "sips:bob@example.com",
+		"sip:carol@example.com": "sip:carol@example.com",
+	}
+	for raw, want := range tests {
+		if got := NormalizeContactURI(raw, ""); got != want {
+			t.Errorf("NormalizeContactURI(%q) = %q, want %q", raw, got, want)
+		}
+	}
+}
+
 func TestContactNameResolvesDialTargets(t *testing.T) {
 	contacts := []Contact{
 		testContact("sip:alice@example.com", "Alice"),

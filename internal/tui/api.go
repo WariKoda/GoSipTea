@@ -111,6 +111,13 @@ type UpdateMsg struct {
 	Now      *time.Time
 }
 
+// ActionResultMsg reports a successful action. It replaces all presentation
+// state and shows Err, or clears the previous error when Err is nil.
+type ActionResultMsg struct {
+	Snapshot Snapshot
+	Err      error
+}
+
 // ErrorMsg displays an adapter or domain error without coupling the model to its source.
 type ErrorMsg struct {
 	Err error

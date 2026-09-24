@@ -382,6 +382,26 @@ func TestSnapshotUpdateErrorAndResizeMessages(t *testing.T) {
 	}
 }
 
+func TestActionResultClearsOnlyAfterSuccess(t *testing.T) {
+	model := New(testSnapshot(), nil)
+	model, _ = updateModel(model, ErrorMsg{Err: errors.New("enter a full SIP address")})
+
+	model, _ = updateModel(model, SnapshotMsg{Snapshot: testSnapshot()})
+	if !strings.Contains(model.View(), "enter a full SIP address") {
+		t.Fatalf("session snapshot cleared the adapter error:\n%s", model.View())
+	}
+
+	model, _ = updateModel(model, ActionResultMsg{Snapshot: testSnapshot()})
+	if model.errText != "" {
+		t.Fatalf("error after successful action = %q", model.errText)
+	}
+
+	model, _ = updateModel(model, ActionResultMsg{Snapshot: testSnapshot(), Err: errors.New("notify-send failed")})
+	if model.errText != "notify-send failed" {
+		t.Fatalf("session error after successful action = %q", model.errText)
+	}
+}
+
 func testSnapshot() Snapshot {
 	return Snapshot{
 		Phone: PhoneSnapshot{

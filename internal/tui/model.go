@@ -127,6 +127,10 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.applySnapshot(msg.Snapshot, false)
 		}
 		return m, nil
+	case ActionResultMsg:
+		m.applySnapshot(msg.Snapshot, false)
+		m.setError(msg.Err)
+		return m, nil
 	case UpdateMsg:
 		m.applyUpdate(msg)
 		return m, nil

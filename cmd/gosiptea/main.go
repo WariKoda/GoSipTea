@@ -218,7 +218,13 @@ func makeDispatch(parent context.Context, phone *session.Session, countryCode st
 			if err != nil {
 				return tui.ErrorMsg{Err: err}
 			}
-			return tui.SnapshotMsg{Snapshot: toTUISnapshot(phone.Snapshot(), countryCode)}
+			// A session error from a concurrent event must stay visible.
+			snapshot := phone.Snapshot()
+			result := tui.ActionResultMsg{Snapshot: toTUISnapshot(snapshot, countryCode)}
+			if snapshot.LastError != "" {
+				result.Err = errors.New(snapshot.LastError)
+			}
+			return result
 		}
 	}
 }

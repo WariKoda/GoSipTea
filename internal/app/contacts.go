@@ -31,7 +31,9 @@ func NormalizeContactURI(raw, domain string) string {
 	lower := strings.ToLower(value)
 	if strings.HasPrefix(lower, "sip:") || strings.HasPrefix(lower, "sips:") {
 		if strings.Count(value, "@") == 1 && contactURIPattern.MatchString(value) {
-			return value
+			// The scheme is case-insensitive, but the contacts file stores it in lowercase.
+			scheme := lower[:strings.IndexByte(lower, ':')+1]
+			return scheme + value[len(scheme):]
 		}
 		return ""
 	}
@@ -105,11 +107,11 @@ func CallerName(contacts []Contact, peerURI, displayName, countryCallingCode str
 	if name, ok := ContactName(contacts, peerURI, countryCallingCode); ok {
 		return name
 	}
-	fallbackSource := displayName
-	if fallbackSource == "" {
-		fallbackSource = peerURI
+	// The provider display name is free text, so an "@" in it is not an address.
+	if name := strings.TrimSpace(ClampText(displayName, MaxPeerDisplayLength)); name != "" {
+		return name
 	}
-	return PeerDisplay(fallbackSource)
+	return PeerDisplay(peerURI)
 }
 
 // ContactName returns the unambiguous contact name for a SIP address or a
