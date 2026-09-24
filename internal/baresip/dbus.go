@@ -32,12 +32,13 @@ type DBusClient struct {
 	eventMatch []dbus.MatchOption
 	ownerMatch []dbus.MatchOption
 
-	mu      sync.RWMutex
-	err     error
-	closing bool
+	mu       sync.RWMutex
+	err      error
+	closing  bool
+	verified bool
 }
 
-// NewClient connects to the current baresip D-Bus owner and starts watching it.
+// NewClient pins the current unique owner. VerifyOwner must succeed before use.
 func NewClient(ctx context.Context) (*DBusClient, error) {
 	if ctx == nil {
 		return nil, errors.New("nil context")
@@ -51,14 +52,14 @@ func NewClient(ctx context.Context) (*DBusClient, error) {
 		return nil, fmt.Errorf("connect to session bus: %w", err)
 	}
 
+	setupCtx, setupCancel := context.WithTimeout(ctx, InvokeTimeout)
+	defer setupCancel()
 	client := &DBusClient{
 		conn:    conn,
-		object:  conn.Object(ServiceName, dbus.ObjectPath(ObjectPath)),
 		signals: make(chan *dbus.Signal, EventBufferSize),
 		events:  make(chan Event, EventBufferSize),
 		done:    make(chan struct{}),
 		eventMatch: []dbus.MatchOption{
-			dbus.WithMatchSender(ServiceName),
 			dbus.WithMatchInterface(InterfaceName),
 			dbus.WithMatchMember("event"),
 			dbus.WithMatchObjectPath(dbus.ObjectPath(ObjectPath)),
@@ -77,26 +78,57 @@ func NewClient(ctx context.Context) (*DBusClient, error) {
 		conn.RemoveSignal(client.signals)
 		_ = conn.Close()
 	}
-	if err := conn.AddMatchSignalContext(ctx, client.eventMatch...); err != nil {
-		cleanup()
-		return nil, fmt.Errorf("subscribe to baresip events: %w", err)
-	}
-	if err := conn.AddMatchSignalContext(ctx, client.ownerMatch...); err != nil {
+	if err := conn.AddMatchSignalContext(setupCtx, client.ownerMatch...); err != nil {
 		cleanup()
 		return nil, fmt.Errorf("watch baresip service owner: %w", err)
 	}
 
-	owner, err := getNameOwner(ctx, conn)
+	owner, err := getNameOwner(setupCtx, conn)
 	if err != nil {
 		cleanup()
 		return nil, err
 	}
 	client.owner = owner
+	client.object = conn.Object(owner, dbus.ObjectPath(ObjectPath))
+	client.eventMatch = append(client.eventMatch, dbus.WithMatchSender(owner))
+	if err := conn.AddMatchSignalContext(setupCtx, client.eventMatch...); err != nil {
+		cleanup()
+		return nil, fmt.Errorf("subscribe to baresip events: %w", err)
+	}
 
 	runCtx, cancel := context.WithCancel(ctx)
 	client.cancel = cancel
 	go client.run(runCtx)
 	return client, nil
+}
+
+// VerifyOwner checks the credentials of the pinned connection, never the
+// replaceable service name. A nonpositive PID cannot authorize commands.
+func (client *DBusClient) VerifyOwner(ctx context.Context, pid int) error {
+	if ctx == nil {
+		return errors.New("baresip: nil context")
+	}
+	if pid <= 0 {
+		return ErrOwnerMismatch
+	}
+	if err := client.connectionError(); err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(ctx, InvokeTimeout)
+	defer cancel()
+	var ownerPID uint32
+	if err := client.conn.BusObject().CallWithContext(ctx,
+		dbusInterface+".GetConnectionUnixProcessID", dbus.FlagNoAutoStart, client.owner,
+	).Store(&ownerPID); err != nil {
+		return fmt.Errorf("baresip: verify owner PID: %w", err)
+	}
+	if uint64(ownerPID) != uint64(pid) {
+		return ErrOwnerMismatch
+	}
+	client.mu.Lock()
+	client.verified = true
+	client.mu.Unlock()
+	return nil
 }
 
 // Invoke calls com.github.Baresip.invoke with one validated command line.
@@ -109,6 +141,13 @@ func (client *DBusClient) Invoke(ctx context.Context, commandLine string) (strin
 	}
 	if err := client.connectionError(); err != nil {
 		return "", err
+	}
+
+	client.mu.RLock()
+	verified := client.verified
+	client.mu.RUnlock()
+	if !verified {
+		return "", ErrOwnerUnverified
 	}
 
 	callCtx, cancel := context.WithTimeout(ctx, InvokeTimeout)
@@ -206,6 +245,9 @@ func (client *DBusClient) run(ctx context.Context) {
 
 			switch signal.Name {
 			case baresipEventSignal:
+				if signal.Sender != client.owner {
+					continue
+				}
 				event, err := ParseEventSignal(signal.Body)
 				if err != nil {
 					continue
@@ -220,7 +262,7 @@ func (client *DBusClient) run(ctx context.Context) {
 					return
 				}
 			case nameOwnerChangedSignal:
-				if client.ownerChanged(signal.Body) {
+				if signal.Sender == dbusInterface && client.ownerChanged(signal.Body) {
 					terminalErr = ErrServiceGone
 					return
 				}

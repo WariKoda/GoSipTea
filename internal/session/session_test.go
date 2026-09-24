@@ -504,6 +504,15 @@ func (p *fakeProcess) Stop(context.Context) error {
 	return nil
 }
 
+func (p *fakeProcess) PID() int {
+	select {
+	case <-p.done:
+		return 0
+	default:
+		return 12345
+	}
+}
+
 func (p *fakeProcess) Done() <-chan struct{} { return p.done }
 func (p *fakeProcess) Err() error            { return p.err }
 
@@ -527,6 +536,11 @@ func newFakeClient(order *recorder) *fakeClient {
 		commandErrors: make(map[string]error),
 		responses:     make(map[string]string),
 	}
+}
+
+func (c *fakeClient) VerifyOwner(context.Context, int) error {
+	c.order.add("client.verify")
+	return nil
 }
 
 func (c *fakeClient) Invoke(ctx context.Context, commandLine string) (string, error) {

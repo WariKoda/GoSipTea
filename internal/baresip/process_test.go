@@ -10,7 +10,8 @@ import (
 
 func TestProcessManagerRejectsExistingOwner(t *testing.T) {
 	manager := NewProcessManager(ProcessOptions{
-		Path: "/path/that/must/not/be/run",
+		Path:        "/path/that/must/not/be/run",
+		AcquireLock: fakeStartupLock,
 		OwnerChecker: OwnerCheckFunc(func(context.Context) (bool, error) {
 			return true, nil
 		}),
@@ -28,6 +29,7 @@ func TestProcessManagerRejectsExistingOwner(t *testing.T) {
 func TestProcessManagerReportsOwnerCheckFailure(t *testing.T) {
 	checkErr := errors.New("check failed")
 	manager := NewProcessManager(ProcessOptions{
+		AcquireLock: fakeStartupLock,
 		OwnerChecker: OwnerCheckFunc(func(context.Context) (bool, error) {
 			return false, checkErr
 		}),
@@ -48,6 +50,7 @@ func TestProcessManagerStartAndStop(t *testing.T) {
 		Path:        "/bin/sleep",
 		Args:        []string{"30"},
 		StopTimeout: time.Second,
+		AcquireLock: fakeStartupLock,
 		OwnerChecker: OwnerCheckFunc(func(context.Context) (bool, error) {
 			return false, nil
 		}),
@@ -71,6 +74,7 @@ func TestProcessManagerStartAndStop(t *testing.T) {
 
 func TestProcessManagerWaitBeforeStart(t *testing.T) {
 	manager := NewProcessManager(ProcessOptions{
+		AcquireLock: fakeStartupLock,
 		OwnerChecker: OwnerCheckFunc(func(context.Context) (bool, error) {
 			return false, nil
 		}),

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"unicode/utf8"
 
 	"github.com/nibra/gosiptea/internal/app"
 )
@@ -52,7 +53,7 @@ func (s *Store) ReadCallHistory() ([]app.CallHistoryEntry, error) {
 		return nil, fmt.Errorf("%w: call history has more than %d entries", ErrInvalid, MaxCallHistoryEntries)
 	}
 	for index, entry := range document.Calls {
-		if err := validateCallHistoryEntry(entry); err != nil {
+		if err := ValidateCallHistoryEntry(entry); err != nil {
 			return nil, fmt.Errorf("%w: call history entry %d: %v", ErrInvalid, index, err)
 		}
 	}
@@ -70,7 +71,7 @@ func (s *Store) WriteCallHistory(entries []app.CallHistoryEntry) error {
 	}
 	calls := append([]app.CallHistoryEntry(nil), entries...)
 	for index, entry := range calls {
-		if err := validateCallHistoryEntry(entry); err != nil {
+		if err := ValidateCallHistoryEntry(entry); err != nil {
 			return fmt.Errorf("%w: call history entry %d: %v", ErrInvalid, index, err)
 		}
 	}
@@ -91,7 +92,11 @@ func (s *Store) WriteCallHistory(entries []app.CallHistoryEntry) error {
 	})
 }
 
-func validateCallHistoryEntry(entry app.CallHistoryEntry) error {
+// ValidateCallHistoryEntry checks the persistence contract before an entry is
+// retained in memory. Targets are limited to 255 bytes and are never rewritten.
+// Peer labels allow 255 Unicode code points, including legacy labels longer
+// than the current 64-code-point display limit.
+func ValidateCallHistoryEntry(entry app.CallHistoryEntry) error {
 	switch entry.Direction {
 	case app.CallDirectionIncoming, app.CallDirectionOutgoing:
 	default:
@@ -104,10 +109,10 @@ func validateCallHistoryEntry(entry app.CallHistoryEntry) error {
 	default:
 		return errors.New("unknown outcome")
 	}
-	if len(entry.Target) > MaxFieldLength {
+	if !utf8.ValidString(entry.Target) || len(entry.Target) > MaxFieldLength || app.ValidateInput(entry.Target, MaxFieldLength) != nil {
 		return errors.New("invalid target")
 	}
-	if len(entry.Peer) > MaxFieldLength {
+	if !utf8.ValidString(entry.Peer) || utf8.RuneCountInString(entry.Peer) > MaxFieldLength {
 		return errors.New("invalid peer")
 	}
 	if entry.StartedAt.IsZero() || entry.EndedAt.IsZero() || entry.EndedAt.Before(entry.StartedAt) {

@@ -19,6 +19,8 @@ const (
 
 var (
 	ErrClosed             = errors.New("baresip client is closed")
+	ErrOwnerUnverified    = errors.New("baresip owner has not been verified")
+	ErrOwnerMismatch      = errors.New("baresip owner PID does not match the owned child")
 	ErrServiceUnavailable = errors.New("baresip service is not available")
 	ErrServiceGone        = errors.New("baresip service disappeared")
 	ErrBusDisconnected    = errors.New("session bus disconnected")
@@ -34,6 +36,7 @@ type Event map[string]any
 
 // Client is the control connection used by the rest of the application.
 type Client interface {
+	VerifyOwner(ctx context.Context, pid int) error
 	Invoke(ctx context.Context, commandLine string) (string, error)
 	Command(ctx context.Context, command, params string) (string, error)
 	Events() <-chan Event

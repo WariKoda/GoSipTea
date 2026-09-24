@@ -56,6 +56,7 @@ type Config struct {
 type Process interface {
 	Start(context.Context) error
 	Stop(context.Context) error
+	PID() int
 	Done() <-chan struct{}
 	Err() error
 }
@@ -400,8 +401,15 @@ func (s *Session) launch(lifetimeCtx, startupCtx context.Context) (Process, bare
 		Stderr:      log,
 		StopTimeout: s.config.StopTimeout,
 		OwnerChecker: baresip.OwnerCheckFunc(func(context.Context) (bool, error) {
-			return baresip.ServiceHasOwner(startupCtx)
+			ctx, cancel := context.WithTimeout(startupCtx, s.config.CommandTimeout)
+			defer cancel()
+			return baresip.ServiceHasOwner(ctx)
 		}),
+		AcquireLock: func(context.Context) (baresip.StartupLock, error) {
+			ctx, cancel := context.WithTimeout(startupCtx, s.config.CommandTimeout)
+			defer cancel()
+			return baresip.AcquireStartupLock(ctx)
+		},
 	}
 	process := s.deps.NewProcess(options)
 	if process == nil {
@@ -431,6 +439,21 @@ func (s *Session) connect(lifetimeCtx, startupCtx context.Context, process Proce
 		if err == nil {
 			if client == nil {
 				return nil, errors.New("session: client factory returned nil")
+			}
+			pid := process.PID()
+			if pid <= 0 {
+				_ = client.Close()
+				return nil, fmt.Errorf("session: verify baresip owner: %w", baresip.ErrNotRunning)
+			}
+			verifyCtx, cancel := context.WithTimeout(startupCtx, s.config.CommandTimeout)
+			verifyErr := client.VerifyOwner(verifyCtx, pid)
+			cancel()
+			if verifyErr == nil && process.PID() != pid {
+				verifyErr = baresip.ErrNotRunning
+			}
+			if verifyErr != nil {
+				closeErr := client.Close()
+				return nil, fmt.Errorf("session: verify baresip owner: %w", errors.Join(verifyErr, closeErr))
 			}
 			return client, nil
 		}
@@ -494,7 +517,11 @@ func (s *Session) publish(snapshot Snapshot) {
 		select {
 		case updates <- copy:
 		default:
-			<-updates
+			// The subscriber may have drained the buffer since the failed send.
+			select {
+			case <-updates:
+			default:
+			}
 			updates <- copy
 		}
 	}

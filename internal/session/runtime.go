@@ -132,12 +132,10 @@ func (s *Session) applyDomainEvent(rt *runtime, ctx context.Context, event app.E
 		return errors.Join(err, s.appendCallHistory(entries))
 	}
 
-	history := mergeCallHistory(currentSnapshot.History, transition.History)
-	var historyErr error
-	if len(transition.History) > 0 {
-		historyErr = s.deps.Store.WriteCallHistory(history)
-		if historyErr != nil {
-			historyErr = fmt.Errorf("session: persist call history: %w", historyErr)
+	history, historyErr := mergeCallHistory(currentSnapshot.History, transition.History)
+	if len(transition.History) > 0 || historyErr != nil {
+		if err := s.deps.Store.WriteCallHistory(history); err != nil {
+			historyErr = errors.Join(historyErr, fmt.Errorf("session: persist call history: %w", err))
 		}
 	}
 	s.updateSnapshot(func(snapshot *Snapshot) {
@@ -165,34 +163,39 @@ func (s *Session) appendCallHistory(entries []app.CallHistoryEntry) error {
 	if len(entries) == 0 {
 		return nil
 	}
-	history := mergeCallHistory(s.Snapshot().History, entries)
-	err := s.deps.Store.WriteCallHistory(history)
+	history, historyErr := mergeCallHistory(s.Snapshot().History, entries)
+	if err := s.deps.Store.WriteCallHistory(history); err != nil {
+		historyErr = errors.Join(historyErr, fmt.Errorf("session: persist call history: %w", err))
+	}
 	s.updateSnapshot(func(snapshot *Snapshot) {
 		snapshot.History = history
 	})
-	if err != nil {
-		return fmt.Errorf("session: persist call history: %w", err)
-	}
-	return nil
+	return historyErr
 }
 
-func mergeCallHistory(current, added []app.CallHistoryEntry) []app.CallHistoryEntry {
-	if len(added) == 0 {
-		return append([]app.CallHistoryEntry(nil), current...)
-	}
+func mergeCallHistory(current, added []app.CallHistoryEntry) ([]app.CallHistoryEntry, error) {
 	limit := min(storage.MaxCallHistoryEntries, len(added)+len(current))
 	result := make([]app.CallHistoryEntry, 0, limit)
-	for _, entry := range added {
-		entry.StartedAt = entry.StartedAt.UTC()
-		entry.ConnectedAt = entry.ConnectedAt.UTC()
-		entry.EndedAt = entry.EndedAt.UTC()
-		result = append(result, entry)
-		if len(result) == limit {
-			return result
+	var historyErr error
+	for _, entries := range [][]app.CallHistoryEntry{added, current} {
+		for _, entry := range entries {
+			entry.Peer = app.ClampText(entry.Peer, app.MaxPeerDisplayLength)
+			entry.StartedAt = entry.StartedAt.UTC()
+			entry.ConnectedAt = entry.ConnectedAt.UTC()
+			entry.EndedAt = entry.EndedAt.UTC()
+			// Invalid targets must not become truncated redial addresses. Drop
+			// the entry, not the call event, so signaling can still complete.
+			if err := storage.ValidateCallHistoryEntry(entry); err != nil {
+				historyErr = errors.Join(historyErr, fmt.Errorf("session: discarded invalid call history entry: %w: %v", storage.ErrInvalid, err))
+				continue
+			}
+			result = append(result, entry)
+			if len(result) == limit {
+				return result, historyErr
+			}
 		}
 	}
-	remaining := min(len(current), limit-len(result))
-	return append(result, current[:remaining]...)
+	return result, historyErr
 }
 
 func failedDialHistory(event app.Event) (app.CallHistoryEntry, bool) {
@@ -238,16 +241,15 @@ func (s *Session) finalizeActiveCall(at time.Time, endRequested bool) error {
 		current.State.EndRequested = true
 	}
 	transition := app.Reduce(current.State, app.CallEvent{Type: app.CallEventClosed, ID: current.State.CallID, At: at})
-	history := mergeCallHistory(current.History, transition.History)
-	err := s.deps.Store.WriteCallHistory(history)
+	history, historyErr := mergeCallHistory(current.History, transition.History)
+	if err := s.deps.Store.WriteCallHistory(history); err != nil {
+		historyErr = errors.Join(historyErr, fmt.Errorf("session: persist call history: %w", err))
+	}
 	s.updateSnapshot(func(snapshot *Snapshot) {
 		snapshot.State = transition.State
 		snapshot.History = history
 	})
-	if err != nil {
-		return fmt.Errorf("session: persist call history: %w", err)
-	}
-	return nil
+	return historyErr
 }
 
 func (s *Session) executeCommands(client baresip.Client, ctx context.Context, commands []app.Command) error {

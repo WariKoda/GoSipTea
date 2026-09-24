@@ -17,6 +17,7 @@ var (
 	ErrAlreadyRunning = errors.New("baresip process is already running")
 	ErrNotRunning     = errors.New("baresip process is not running")
 	ErrServiceOwned   = errors.New("another process owns com.github.Baresip")
+	ErrStartupLocked  = errors.New("another GoSipTea instance owns the session bus startup lock")
 )
 
 // OwnerChecker checks whether another process already exports the baresip service.
@@ -37,6 +38,13 @@ func (sessionOwnerChecker) HasOwner(ctx context.Context) (bool, error) {
 	return ServiceHasOwner(ctx)
 }
 
+// StartupLock excludes other app instances until the owned child exits.
+// Losing the lock cancels the child; Close releases it after the child is reaped.
+type StartupLock interface {
+	io.Closer
+	Done() <-chan struct{}
+}
+
 // ProcessOptions configures a baresip child process owned by this application.
 type ProcessOptions struct {
 	Path         string
@@ -48,6 +56,7 @@ type ProcessOptions struct {
 	Stderr       io.Writer
 	StopTimeout  time.Duration
 	OwnerChecker OwnerChecker
+	AcquireLock  func(context.Context) (StartupLock, error)
 }
 
 // ProcessManager starts and stops only the child it created. It never invokes systemd.
@@ -73,6 +82,9 @@ func NewProcessManager(options ProcessOptions) *ProcessManager {
 	if options.OwnerChecker == nil {
 		options.OwnerChecker = sessionOwnerChecker{}
 	}
+	if options.AcquireLock == nil {
+		options.AcquireLock = AcquireStartupLock
+	}
 	options.Args = append([]string(nil), options.Args...)
 	if options.Env != nil {
 		options.Env = append([]string{}, options.Env...)
@@ -95,6 +107,17 @@ func (manager *ProcessManager) Start(ctx context.Context) error {
 		return err
 	}
 
+	lock, err := manager.options.AcquireLock(ctx)
+	if err != nil {
+		return fmt.Errorf("baresip: acquire startup lock: %w", err)
+	}
+	started := false
+	defer func() {
+		if !started {
+			_ = lock.Close()
+		}
+	}()
+
 	hasOwner, err := manager.options.OwnerChecker.HasOwner(ctx)
 	if err != nil {
 		return fmt.Errorf("check existing baresip owner: %w", err)
@@ -104,7 +127,13 @@ func (manager *ProcessManager) Start(ctx context.Context) error {
 	}
 
 	done := make(chan struct{})
-	cmd := exec.CommandContext(ctx, manager.options.Path, manager.options.Args...)
+	childCtx, cancel := context.WithCancel(ctx)
+	defer func() {
+		if !started {
+			cancel()
+		}
+	}()
+	cmd := exec.CommandContext(childCtx, manager.options.Path, manager.options.Args...)
 	cmd.Dir = manager.options.Dir
 	cmd.Env = manager.options.Env
 	cmd.Stdin = manager.options.Stdin
@@ -127,7 +156,15 @@ func (manager *ProcessManager) Start(ctx context.Context) error {
 	manager.done = done
 	manager.waitErr = nil
 	manager.running = true
-	go manager.wait(cmd, done)
+	started = true
+	go func() {
+		select {
+		case <-lock.Done():
+			cancel()
+		case <-done:
+		}
+	}()
+	go manager.wait(cmd, done, lock, cancel)
 	return nil
 }
 
@@ -205,6 +242,16 @@ func (manager *ProcessManager) Wait(ctx context.Context) error {
 	}
 }
 
+// PID returns zero unless the owned child is still running.
+func (manager *ProcessManager) PID() int {
+	manager.mu.RLock()
+	defer manager.mu.RUnlock()
+	if manager.cmd == nil || !manager.running {
+		return 0
+	}
+	return manager.cmd.Process.Pid
+}
+
 func (manager *ProcessManager) Running() bool {
 	manager.mu.RLock()
 	defer manager.mu.RUnlock()
@@ -232,9 +279,11 @@ func (manager *ProcessManager) finishStopping(done <-chan struct{}) {
 	manager.mu.Unlock()
 }
 
-func (manager *ProcessManager) wait(cmd *exec.Cmd, done chan struct{}) {
+func (manager *ProcessManager) wait(cmd *exec.Cmd, done chan struct{}, lock StartupLock, cancel context.CancelFunc) {
+	defer cancel()
 	err := cmd.Wait()
 	_ = normalizeSignalError(signalProcessGroup(cmd.Process, killSignal()))
+	_ = lock.Close()
 
 	manager.mu.Lock()
 	if manager.cmd == cmd {
