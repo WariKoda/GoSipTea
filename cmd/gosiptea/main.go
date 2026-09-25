@@ -199,6 +199,8 @@ func makeDispatch(parent context.Context, phone *session.Session, countryCode st
 					err = phone.SelectAudioDevice(ctx, audio.KindSink, action.Audio.Name)
 				case tui.AudioInput:
 					err = phone.SelectAudioDevice(ctx, audio.KindSource, action.Audio.Name)
+				case tui.AudioRingtone:
+					err = phone.SelectRingtone(ctx, action.Audio.Name)
 				default:
 					err = fmt.Errorf("unsupported audio field %q", action.Audio.Field)
 				}
@@ -255,10 +257,12 @@ func toTUISnapshot(snapshot session.Snapshot, countryCode string) tui.Snapshot {
 			Contacts: contacts,
 		},
 		Audio: tui.AudioSnapshot{
-			Inputs:         inputs,
-			Outputs:        outputs,
-			SelectedInput:  snapshot.AudioConfig.Input,
-			SelectedOutput: snapshot.AudioConfig.Output,
+			Inputs:                  inputs,
+			Outputs:                 outputs,
+			SelectedInput:           snapshot.AudioConfig.Input,
+			SelectedOutput:          snapshot.AudioConfig.Output,
+			SelectedRingtone:        snapshot.AudioConfig.Alert,
+			RingtoneRestartRequired: snapshot.RingtoneRestartRequired,
 		},
 		Account: tui.AccountSnapshot{
 			Configured:  snapshot.Account.Configured,

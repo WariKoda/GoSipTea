@@ -193,3 +193,85 @@ func TestDNDRejectedCallDoesNotPauseMedia(t *testing.T) {
 		t.Fatalf("media pause calls for a DND-rejected call = %d, want 0", got)
 	}
 }
+
+func TestSelectRingtoneSavesWithoutBaresipCommand(t *testing.T) {
+	t.Parallel()
+	h, ctx := newAudioHarness(t)
+
+	if err := h.session.SelectRingtone(ctx, "sink.new"); err != nil {
+		t.Fatalf("SelectRingtone() error = %v", err)
+	}
+	if got := audioCommands(h.clients[0]); len(got) != 0 {
+		t.Fatalf("audio commands = %v, want none", got)
+	}
+	want := storage.AudioConfig{Alert: "sink.new"}
+	if h.store.audioConfig != want {
+		t.Fatalf("persisted audio config = %#v, want %#v", h.store.audioConfig, want)
+	}
+	snapshot := h.session.Snapshot()
+	if snapshot.AudioConfig != want || !snapshot.RingtoneRestartRequired {
+		t.Fatalf("snapshot audio = %#v, restart required = %v", snapshot.AudioConfig, snapshot.RingtoneRestartRequired)
+	}
+
+	// Choosing the device baresip already rings on clears the hint again.
+	if err := h.session.SelectRingtone(ctx, ""); err != nil {
+		t.Fatalf("SelectRingtone(\"\") error = %v", err)
+	}
+	if h.session.Snapshot().RingtoneRestartRequired {
+		t.Fatal("restart still required after returning to the running ringtone device")
+	}
+}
+
+func TestSelectRingtoneRejectsMissingOutput(t *testing.T) {
+	t.Parallel()
+	h, ctx := newAudioHarness(t)
+	if err := h.session.SelectRingtone(ctx, "source.new"); !errors.Is(err, ErrAudioNodeMissing) {
+		t.Fatalf("SelectRingtone(source) error = %v, want ErrAudioNodeMissing", err)
+	}
+	if h.store.audioConfig != (storage.AudioConfig{}) {
+		t.Fatalf("persisted audio config = %#v", h.store.audioConfig)
+	}
+}
+
+// baresip's auplay also moves the ringtone, so changing the call output while
+// a separate ringtone is configured needs a restart.
+func TestOutputChangeMovesRunningRingtone(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.store.audioConfig = storage.AudioConfig{Output: "sink.old", Alert: "sink.new"}
+	h.session.deps.Audio = fakeAudioLister{nodes: []audio.Node{
+		{ID: 1, Name: "sink.old", Kind: audio.KindSink, Default: true},
+		{ID: 2, Name: "sink.new", Kind: audio.KindSink},
+		{ID: 3, Name: "sink.third", Kind: audio.KindSink},
+	}}
+	ctx := context.Background()
+	if err := h.session.Start(ctx); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	t.Cleanup(func() { _ = h.session.Stop(ctx) })
+	if h.session.Snapshot().RingtoneRestartRequired {
+		t.Fatal("restart required right after start")
+	}
+
+	if err := h.session.SelectAudioDevice(ctx, audio.KindSink, "sink.third"); err != nil {
+		t.Fatalf("SelectAudioDevice() error = %v", err)
+	}
+	snapshot := h.session.Snapshot()
+	if !snapshot.RingtoneRestartRequired {
+		t.Fatal("restart not required after auplay moved the ringtone")
+	}
+	if want := (storage.AudioConfig{Output: "sink.third", Alert: "sink.new"}); snapshot.AudioConfig != want {
+		t.Fatalf("audio config = %#v, want %#v", snapshot.AudioConfig, want)
+	}
+}
+
+func TestOutputChangeKeepsFollowingRingtone(t *testing.T) {
+	t.Parallel()
+	h, ctx := newAudioHarness(t)
+	if err := h.session.SelectAudioDevice(ctx, audio.KindSink, "sink.new"); err != nil {
+		t.Fatalf("SelectAudioDevice() error = %v", err)
+	}
+	if h.session.Snapshot().RingtoneRestartRequired {
+		t.Fatal("restart required although the ringtone follows the output")
+	}
+}

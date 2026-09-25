@@ -325,6 +325,10 @@ func (s *Session) handleRequest(rt *runtime, req request) (requestResult, bool) 
 		result.err = s.selectAudio(rt, req.ctx, req.audio)
 	case requestSelectAudioDevice:
 		result.err = s.selectAudioDevice(rt, req.ctx, req.audioKind, req.text)
+	case requestSelectRingtone:
+		config := s.Snapshot().AudioConfig
+		config.Alert = req.text
+		result.err = s.selectAudio(rt, req.ctx, config)
 	case requestReadAccount:
 		result.value, result.err = s.readAccount()
 	case requestWriteAccount:
@@ -426,9 +430,11 @@ func (s *Session) applySelectedAudio(rt *runtime, ctx context.Context, config st
 	if err != nil {
 		return err
 	}
+	defer s.publishRingtoneState(rt)
 	if err := s.applyAudioCommand(rt, ctx, "auplay", output); err != nil {
 		return err
 	}
+	rt.noteAudioCommand("auplay", config.Output)
 	return s.applyAudioCommand(rt, ctx, "ausrc", input)
 }
 
@@ -450,13 +456,22 @@ func (s *Session) selectAudio(rt *runtime, ctx context.Context, config storage.A
 	current := s.Snapshot().AudioConfig
 	changeOutput := config.Output != current.Output
 	changeInput := config.Input != current.Input
-	if !changeOutput && !changeInput {
+	changeRingtone := config.Alert != current.Alert
+	if !changeOutput && !changeInput && !changeRingtone {
 		return nil
 	}
+	defer s.publishRingtoneState(rt)
 
 	nodes, err := s.listAudio(ctx)
 	if err != nil {
 		return err
+	}
+	if changeRingtone {
+		// baresip has no command for the ringtone device alone, so the new
+		// choice is only saved. It takes effect when baresip starts again.
+		if err := validateAudioSelection(nodes, storage.AudioConfig{Alert: config.Alert}); err != nil {
+			return err
+		}
 	}
 
 	// Resolve every change before the first command, so a missing input cannot
@@ -480,6 +495,7 @@ func (s *Session) selectAudio(rt *runtime, ctx context.Context, config storage.A
 		if err := s.applyAudioCommand(rt, ctx, change.command, change.device); err != nil {
 			return errors.Join(err, s.restoreAudio(rt, ctx, changes[:i]))
 		}
+		rt.noteAudioCommand(change.command, change.selected)
 	}
 	if err := s.persistAudio(config); err != nil {
 		return fmt.Errorf("session: audio changed for this process but was not saved: %w", err)
@@ -502,10 +518,14 @@ func (s *Session) selectAudioDevice(rt *runtime, ctx context.Context, kind audio
 	return s.selectAudio(rt, ctx, config)
 }
 
+// audioChange keeps the selections next to the resolved devices, because an
+// empty selection means "system default" and must stay comparable.
 type audioChange struct {
-	command  string
-	device   string
-	previous string
+	command          string
+	device           string
+	previous         string
+	selected         string
+	previousSelected string
 }
 
 func resolveAudioChange(nodes []audio.Node, command string, kind audio.Kind, selected, current string) (audioChange, error) {
@@ -522,7 +542,7 @@ func resolveAudioChange(nodes []audio.Node, command string, kind audio.Kind, sel
 	}
 	// Without a previous device there is nothing to restore after a failure.
 	previous, _ := liveAudioDevice(nodes, kind, current)
-	return audioChange{command: command, device: device, previous: previous}, nil
+	return audioChange{command: command, device: device, previous: previous, selected: selected, previousSelected: current}, nil
 }
 
 // restoreAudio switches already applied changes back after a later command
@@ -538,14 +558,44 @@ func (s *Session) restoreAudio(rt *runtime, ctx context.Context, applied []audio
 		}
 		if err := s.applyAudioCommand(rt, ctx, change.command, change.previous); err != nil {
 			errs = append(errs, fmt.Errorf("session: restore previous device: %w", err))
+			continue
 		}
+		rt.noteAudioCommand(change.command, change.previousSelected)
 	}
 	return errors.Join(errs...)
+}
+
+// noteAudioCommand tracks the ringtone device baresip uses. Its auplay command
+// also moves the ringtone to the new call output.
+func (rt *runtime) noteAudioCommand(command, selection string) {
+	if command == "auplay" {
+		rt.ringtone = selection
+	}
+}
+
+func (s *Session) publishRingtoneState(rt *runtime) {
+	snapshot := s.Snapshot()
+	required := rt.ringtone != ringtoneSelection(snapshot.AudioConfig)
+	if snapshot.RingtoneRestartRequired == required {
+		return
+	}
+	s.updateSnapshot(func(snapshot *Snapshot) {
+		snapshot.RingtoneRestartRequired = required
+	})
+}
+
+// ringtoneSelection returns the output selection baresip should ring on.
+func ringtoneSelection(config storage.AudioConfig) string {
+	if config.Alert != "" {
+		return config.Alert
+	}
+	return config.Output
 }
 
 func normalizeAudioConfig(config storage.AudioConfig) storage.AudioConfig {
 	config.Output = strings.TrimSpace(config.Output)
 	config.Input = strings.TrimSpace(config.Input)
+	config.Alert = strings.TrimSpace(config.Alert)
 	return config
 }
 
@@ -568,6 +618,7 @@ func validateAudioSelection(nodes []audio.Node, config storage.AudioConfig) erro
 	}{
 		{name: strings.TrimSpace(config.Output), kind: audio.KindSink},
 		{name: strings.TrimSpace(config.Input), kind: audio.KindSource},
+		{name: strings.TrimSpace(config.Alert), kind: audio.KindSink},
 	}
 	for _, selection := range selected {
 		if selection.name == "" {

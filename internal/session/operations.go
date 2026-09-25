@@ -104,6 +104,13 @@ func (s *Session) SelectAudioDevice(ctx context.Context, kind audio.Kind, name s
 	return err
 }
 
+// SelectRingtone validates and persists the ringtone output. An empty name
+// rings on the call output. baresip applies it when it starts again.
+func (s *Session) SelectRingtone(ctx context.Context, name string) error {
+	_, err := s.request(ctx, request{kind: requestSelectRingtone, text: name})
+	return err
+}
+
 // ReadAccount refreshes and returns the non-secret account view.
 func (s *Session) ReadAccount(ctx context.Context) (storage.Account, error) {
 	result, err := s.request(ctx, request{kind: requestReadAccount})

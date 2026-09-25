@@ -64,10 +64,14 @@ type AudioNodeSnapshot struct {
 
 // AudioSnapshot contains discovered nodes and the saved selection. Empty selections mean system default.
 type AudioSnapshot struct {
-	Inputs         []AudioNodeSnapshot
-	Outputs        []AudioNodeSnapshot
-	SelectedInput  string
-	SelectedOutput string
+	Inputs           []AudioNodeSnapshot
+	Outputs          []AudioNodeSnapshot
+	SelectedInput    string
+	SelectedOutput   string
+	SelectedRingtone string
+	// RingtoneRestartRequired means baresip rings on another device until
+	// GoSipTea starts again.
+	RingtoneRestartRequired bool
 }
 
 // AccountSnapshot intentionally contains no password value.
@@ -155,12 +159,14 @@ type ContactInput struct {
 type AudioField string
 
 const (
-	AudioOutput AudioField = "output"
-	AudioInput  AudioField = "input"
+	AudioOutput   AudioField = "output"
+	AudioInput    AudioField = "input"
+	AudioRingtone AudioField = "ringtone"
 )
 
-// AudioSelection changes only Field, so a stale value for the other list can
-// never be sent back. An empty Name selects the system default.
+// AudioSelection changes only Field, so a stale value for another list can
+// never be sent back. An empty Name selects the system default, or for the
+// ringtone the call output.
 type AudioSelection struct {
 	Field AudioField
 	Name  string

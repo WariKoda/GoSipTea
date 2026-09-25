@@ -16,7 +16,7 @@ This project is under active development.
 - Mute and do-not-disturb controls
 - Search and edit baresip contacts
 - Resolve caller names from local contacts
-- Select PipeWire input and output nodes
+- Select PipeWire input and output nodes, plus a separate ringtone output
 - Keep the latest 200 call attempts and redial from the call history
 - Show desktop notifications and pause all MPRIS media players for incoming calls
 

@@ -14,13 +14,16 @@ const audioDriver = "pipewire"
 
 var audioLinePattern = regexp.MustCompile(`^\s*(audio_player|audio_alert|audio_source)\s+(\S*)`)
 
-// AudioConfig stores PipeWire node names. Empty values select system defaults.
+// AudioConfig stores PipeWire node names. Empty Output and Input select system
+// defaults. An empty Alert rings on the call output.
 type AudioConfig struct {
 	Output string
 	Input  string
+	Alert  string
 }
 
-// ReadAudioConfig reads audio_player and audio_source. audio_alert does not override Output.
+// ReadAudioConfig reads audio_player, audio_source and audio_alert. An alert
+// line naming the output device, or naming no device, reads as an empty Alert.
 func (s *Store) ReadAudioConfig() (AudioConfig, error) {
 	var result AudioConfig
 	if err := s.validate(); err != nil {
@@ -35,15 +38,21 @@ func (s *Store) ReadAudioConfig() (AudioConfig, error) {
 	}
 	for _, line := range splitLines(data) {
 		match := audioLinePattern.FindStringSubmatch(line)
-		if match == nil || match[1] == "audio_alert" {
+		if match == nil {
 			continue
 		}
 		device := parseAudioDevice(match[2])
-		if match[1] == "audio_player" {
+		switch match[1] {
+		case "audio_player":
 			result.Output = device
-		} else {
+		case "audio_alert":
+			result.Alert = device
+		default:
 			result.Input = device
 		}
+	}
+	if result.Alert == result.Output {
+		result.Alert = ""
 	}
 	return result, nil
 }
@@ -52,10 +61,14 @@ func (s *Store) ReadAudioConfig() (AudioConfig, error) {
 func (s *Store) WriteAudioConfig(config AudioConfig) error {
 	config.Output = strings.TrimSpace(config.Output)
 	config.Input = strings.TrimSpace(config.Input)
+	config.Alert = strings.TrimSpace(config.Alert)
 	if err := validateDeviceName("output", config.Output); err != nil {
 		return err
 	}
 	if err := validateDeviceName("input", config.Input); err != nil {
+		return err
+	}
+	if err := validateDeviceName("alert", config.Alert); err != nil {
 		return err
 	}
 
@@ -85,27 +98,31 @@ func (s *Store) WriteAudioConfig(config AudioConfig) error {
 			}
 			key := match[1]
 			seen[key] = true
-			device := config.Output
-			if key == "audio_source" {
-				device = config.Input
-			}
-			output = append(output, renderAudioLine(key, device))
+			output = append(output, renderAudioLine(key, config.device(key)))
 		}
 		for _, key := range []string{"audio_player", "audio_source", "audio_alert"} {
 			if seen[key] {
 				continue
 			}
-			device := config.Output
-			if key == "audio_source" {
-				device = config.Input
-			}
-			output = append(output, renderAudioLine(key, device))
+			output = append(output, renderAudioLine(key, config.device(key)))
 		}
 		if err := atomicWrite(s.paths.Config, joinLines(output), 0o644); err != nil {
 			return fmt.Errorf("write config: %w", err)
 		}
 		return nil
 	})
+}
+
+func (config AudioConfig) device(key string) string {
+	switch key {
+	case "audio_source":
+		return config.Input
+	case "audio_alert":
+		if config.Alert != "" {
+			return config.Alert
+		}
+	}
+	return config.Output
 }
 
 func parseAudioDevice(value string) string {

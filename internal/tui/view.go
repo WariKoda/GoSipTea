@@ -364,11 +364,19 @@ func (m Model) contactsView() string {
 }
 
 func (m Model) audioView() string {
-	// Title, blank line and two panels with border and heading take 8 lines.
-	available := max(2, (m.frame().height-8)/2)
-	outputs := m.audioListView("Output", m.outputOptions(), m.outputCursor, m.audioOutput, m.audioField == 0, available)
-	inputs := m.audioListView("Input", m.inputOptions(), m.inputCursor, m.audioInput, m.audioField == 1, available)
-	return strings.Join([]string{titleStyle.Render("Audio"), outputs, "", inputs}, "\n")
+	// The title and three panels with border and heading take 10 lines.
+	reserved := 10
+	lines := []string{titleStyle.Render("Audio")}
+	if m.snapshot.Audio.RingtoneRestartRequired {
+		lines = append(lines, warnStyle.Render("Restart GoSipTea to ring on the selected ringtone output."))
+		reserved++
+	}
+	available := max(2, (m.frame().height-reserved)/audioFieldCount)
+	return strings.Join(append(lines,
+		m.audioListView("Output", m.outputOptions(), m.outputCursor, m.audioOutput, m.audioField == 0, available),
+		m.audioListView("Input", m.inputOptions(), m.inputCursor, m.audioInput, m.audioField == 1, available),
+		m.audioListView("Ringtone", m.ringtoneOptions(), m.ringtoneCursor, m.audioRingtone, m.audioField == 2, available),
+	), "\n")
 }
 
 func (m Model) audioListView(title string, options []audioOption, cursor int, selected string, focused bool, limit int) string {
@@ -453,7 +461,7 @@ func (m Model) helpView() string {
 	case ViewContacts:
 		return "/ search   ↑/↓ select   d dial   a add   x remove   1-5 views   q quit"
 	case ViewAudio:
-		return "Tab input/output   ↑/↓ select   Enter apply   1-5 views   q quit"
+		return "Tab switch list   ↑/↓ select   Enter apply   1-5 views   q quit"
 	case ViewAccount:
 		return "↑/↓ select   Enter edit/toggle/save   1-5 views   q quit"
 	case ViewHistory:

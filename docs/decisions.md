@@ -10,6 +10,11 @@
 - An incoming call also focuses the window hosting the TUI, so Hyprland
   switches to its workspace. The focus is not returned when the call ends.
 - Account, contact and audio formats remain compatible with `~/.baresip`.
+- The ringtone can use its own output, stored as `audio_alert`. baresip has
+  no command that changes only the ringtone device, and its `auplay` command
+  moves the ringtone together with the call output. A new ringtone output, or
+  a changed call output while a separate ringtone is set, therefore applies
+  after GoSipTea starts again. The audio view says when a restart is needed.
 - The call history keeps the latest 200 attempts in
   `~/.baresip/gosiptea-call-history.json`. It includes connected, missed,
   rejected, busy, DND and failed outgoing calls. Selecting an entry can dial

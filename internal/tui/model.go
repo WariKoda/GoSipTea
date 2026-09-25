@@ -13,6 +13,9 @@ const (
 	defaultWidth  = 80
 	defaultHeight = 24
 	fieldLimit    = 255
+
+	// Output, input and ringtone lists in the audio view.
+	audioFieldCount = 3
 )
 
 type contactMode int
@@ -44,11 +47,13 @@ type Model struct {
 	contactCursor int
 	historyCursor int
 
-	audioField   int
-	inputCursor  int
-	outputCursor int
-	audioInput   string
-	audioOutput  string
+	audioField     int
+	inputCursor    int
+	outputCursor   int
+	ringtoneCursor int
+	audioInput     string
+	audioOutput    string
+	audioRingtone  string
 
 	accountFields      [5]textinput.Model
 	accountFocus       int
@@ -370,16 +375,27 @@ func (m Model) updateContactAdd(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m Model) updateAudio(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
-	if key == "tab" || key == "shift+tab" {
-		m.audioField = (m.audioField + 1) % 2
+	switch key {
+	case "tab":
+		m.audioField = (m.audioField + 1) % audioFieldCount
+		return m, nil
+	case "shift+tab":
+		m.audioField = (m.audioField + audioFieldCount - 1) % audioFieldCount
 		return m, nil
 	}
 
 	options := m.outputOptions()
 	cursor := &m.outputCursor
-	if m.audioField == 1 {
+	field := AudioOutput
+	switch m.audioField {
+	case 1:
 		options = m.inputOptions()
 		cursor = &m.inputCursor
+		field = AudioInput
+	case 2:
+		options = m.ringtoneOptions()
+		cursor = &m.ringtoneCursor
+		field = AudioRingtone
 	}
 	switch key {
 	case "up", "k":
@@ -395,10 +411,6 @@ func (m Model) updateAudio(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		// The selection marker follows the session snapshot, not this key press.
-		field := AudioOutput
-		if m.audioField == 1 {
-			field = AudioInput
-		}
 		return m, m.emit(Action{Kind: ActionSetAudio, Audio: AudioSelection{Field: field, Name: options[*cursor].Name}})
 	}
 	return m, nil
@@ -524,18 +536,25 @@ func (m *Model) syncAccountForm() {
 func (m *Model) syncAudioSelection() {
 	inputName := optionName(m.inputOptions(), m.inputCursor)
 	outputName := optionName(m.outputOptions(), m.outputCursor)
+	ringtoneName := optionName(m.ringtoneOptions(), m.ringtoneCursor)
 	inputChanged := m.audioInput != m.snapshot.Audio.SelectedInput
 	outputChanged := m.audioOutput != m.snapshot.Audio.SelectedOutput
+	ringtoneChanged := m.audioRingtone != m.snapshot.Audio.SelectedRingtone
 	m.audioInput = m.snapshot.Audio.SelectedInput
 	m.audioOutput = m.snapshot.Audio.SelectedOutput
+	m.audioRingtone = m.snapshot.Audio.SelectedRingtone
 	if inputChanged {
 		inputName = m.audioInput
 	}
 	if outputChanged {
 		outputName = m.audioOutput
 	}
+	if ringtoneChanged {
+		ringtoneName = m.audioRingtone
+	}
 	m.inputCursor = optionIndex(m.inputOptions(), inputName)
 	m.outputCursor = optionIndex(m.outputOptions(), outputName)
+	m.ringtoneCursor = optionIndex(m.ringtoneOptions(), ringtoneName)
 }
 
 func (m *Model) clampCursors() {
@@ -548,6 +567,7 @@ func (m *Model) clampCursors() {
 	m.historyCursor = clampCursor(m.historyCursor, len(m.snapshot.History.Calls))
 	m.inputCursor = clampCursor(m.inputCursor, len(m.inputOptions()))
 	m.outputCursor = clampCursor(m.outputCursor, len(m.outputOptions()))
+	m.ringtoneCursor = clampCursor(m.ringtoneCursor, len(m.ringtoneOptions()))
 }
 
 func (m *Model) changeView(view View) {
@@ -690,6 +710,14 @@ func (m Model) inputOptions() []audioOption {
 
 func (m Model) outputOptions() []audioOption {
 	return audioOptions(m.snapshot.Audio.Outputs, m.audioOutput)
+}
+
+// ringtoneOptions lists the outputs. Its first entry follows the call output
+// instead of the system default.
+func (m Model) ringtoneOptions() []audioOption {
+	options := audioOptions(m.snapshot.Audio.Outputs, m.audioRingtone)
+	options[0] = audioOption{Description: "Same as output"}
+	return options
 }
 
 func audioOptions(nodes []AudioNodeSnapshot, selected string) []audioOption {

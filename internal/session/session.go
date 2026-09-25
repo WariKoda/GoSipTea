@@ -114,11 +114,14 @@ type Snapshot struct {
 	Contacts    []storage.Contact
 	AudioNodes  []audio.Node
 	AudioConfig storage.AudioConfig
-	Account     storage.Account
-	History     []app.CallHistoryEntry
-	Running     bool
-	LastError   string
-	Revision    uint64
+	// RingtoneRestartRequired reports that baresip rings on another device
+	// than AudioConfig selects, until GoSipTea starts it again.
+	RingtoneRestartRequired bool
+	Account                 storage.Account
+	History                 []app.CallHistoryEntry
+	Running                 bool
+	LastError               string
+	Revision                uint64
 }
 
 type requestKind uint8
@@ -134,6 +137,7 @@ const (
 	requestApplyAudio
 	requestSelectAudio
 	requestSelectAudioDevice
+	requestSelectRingtone
 	requestReadAccount
 	requestWriteAccount
 	requestStop
@@ -163,6 +167,9 @@ type runtime struct {
 	done     chan struct{}
 	process  Process
 	client   baresip.Client
+	// ringtone is the output selection baresip currently rings on. Only the
+	// runtime goroutine changes it after Start.
+	ringtone string
 }
 
 // Session owns at most one child process and serializes all reducer activity.
@@ -267,6 +274,7 @@ func (s *Session) Start(ctx context.Context) error {
 		cancel:   cancel,
 		requests: make(chan request),
 		done:     make(chan struct{}),
+		ringtone: ringtoneSelection(audioConfig),
 	}
 	process, client, err := s.launch(rt.ctx, ctx)
 	if err != nil {
@@ -289,6 +297,7 @@ func (s *Session) Start(ctx context.Context) error {
 		snapshot.State = state
 		snapshot.Contacts = contacts
 		snapshot.AudioConfig = audioConfig
+		snapshot.RingtoneRestartRequired = false
 		snapshot.Account = account
 		snapshot.History = history
 		snapshot.AudioNodes = nil

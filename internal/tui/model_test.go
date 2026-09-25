@@ -475,3 +475,45 @@ func key(value string) tea.KeyMsg {
 func runeKey(value string) tea.KeyMsg {
 	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(value)}
 }
+
+func TestAudioRingtoneListSendsRingtoneField(t *testing.T) {
+	var actions []Action
+	model := New(testSnapshot(), func(action Action) tea.Cmd {
+		actions = append(actions, action)
+		return nil
+	})
+	model, _ = updateModel(model, key("3"))
+	model, _ = updateModel(model, key("tab"))
+	model, _ = updateModel(model, key("tab"))
+	if rendered := model.View(); !strings.Contains(rendered, "Ringtone") || !strings.Contains(rendered, "Same as output") {
+		t.Fatalf("ringtone list missing:\n%s", rendered)
+	}
+	model, _ = updateModel(model, key("down"))
+	model, _ = updateModel(model, key("enter"))
+	if len(actions) != 1 || actions[0].Audio != (AudioSelection{Field: AudioRingtone, Name: "desk.output"}) {
+		t.Fatalf("audio actions = %#v", actions)
+	}
+
+	model, _ = updateModel(model, key("tab"))
+	if model.audioField != 0 {
+		t.Fatalf("tab after the ringtone list selects field %d, want 0", model.audioField)
+	}
+	model, _ = updateModel(model, tea.KeyMsg{Type: tea.KeyShiftTab})
+	if model.audioField != 2 {
+		t.Fatalf("shift+tab from output selects field %d, want 2", model.audioField)
+	}
+}
+
+func TestAudioViewShowsRingtoneRestartHint(t *testing.T) {
+	snapshot := testSnapshot()
+	snapshot.Audio.SelectedRingtone = "desk.output"
+	model, _ := updateModel(New(snapshot, nil), key("3"))
+	if strings.Contains(model.View(), "Restart GoSipTea") {
+		t.Fatalf("restart hint without pending ringtone change:\n%s", model.View())
+	}
+	snapshot.Audio.RingtoneRestartRequired = true
+	model, _ = updateModel(model, SnapshotMsg{Snapshot: snapshot})
+	if !strings.Contains(model.View(), "Restart GoSipTea") {
+		t.Fatalf("restart hint missing:\n%s", model.View())
+	}
+}
